@@ -1,7 +1,9 @@
 from collections import namedtuple
 import datetime as dt
+from difflib import SequenceMatcher
 
 import requests
+from typing import Tuple
 
 from books.auth import goog_key as key
 
@@ -39,6 +41,9 @@ def search_author(author):
 
 
 def search(title='', author=''):
+    # The author/title composite match ratio must exceed this to be returned.
+    min_match_ratio = .3
+
     url = base_url + 'volumes'
     payload = {'q': 'intitle:{}+inauthor:{}'.format(title, author),
                'printType': 'books'}
@@ -47,13 +52,38 @@ def search(title='', author=''):
 
     result = result.json()
     result = [book['volumeInfo'] for book in result['items']]
-    # return result
+
     trimmed = _trim_results(result)
 
-    return _filter_results(trimmed)
+    ratios = []
+    for book in trimmed:
+        title_ratio = SequenceMatcher(None, title.lower(), book.title.lower()).ratio()
+
+        author_ratios = [SequenceMatcher(None, author.lower(), author_goog.lower()).ratio() for
+                         author_goog in book.authors]
+        # We're only searching for one author, so find the best match in the
+        # authors list google returns, and ignore the rest.
+        best_author_ratio = max(author_ratios)
+        composite = composite_ratio(title_ratio, best_author_ratio)
+        ratios.append((book, title_ratio, best_author_ratio, composite))
+
+    sequenced = sorted(ratios, key=lambda x: x[3], reverse=True)
+
+    filtered = filter(lambda x: x[3] > min_match_ratio, sequenced)
+
+    return list(filtered)
+
+
+def composite_ratio(ratio_1: float, ratio_2: float) -> float:
+    try:
+        return 1 / (1/ratio_1 + 1/ratio_2)
+    except ZeroDivisionError:
+        return 0
 
 
 def _trim_results(raw_data):
+    """Reformat raw Google Books api data into a format with only information
+    we care about."""
     result = []
     for book in raw_data:
         try:
@@ -62,7 +92,7 @@ def _trim_results(raw_data):
         except ValueError:
             pub_date = book['publishedDate']
         except KeyError:
-            pub_date = 'Missing pub date'
+            pub_date = 'missing'
 
         isbn_10 = ''
         isbn_13 = ''
@@ -84,8 +114,3 @@ def _trim_results(raw_data):
             Book(book['title'], book['authors'], isbn_10, isbn_13, pub_date)
         )
     return result
-
-
-def _filter_results(result):
-    has_isbn = lambda x: x.isbn_10 or x.isbn_13
-    return list(filter(has_isbn, result))

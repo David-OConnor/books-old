@@ -4,6 +4,13 @@
     <div class="row">
         <div class="col-md-8 col-md-offset-2 col-xs-12"></div>
 
+            <form action="/" method="post">
+                {% csrf_token %}
+                {{ form }}
+                <input type="submit" value="Submit" />
+            </form>
+
+
             <h1>Book Recommendations</h1>
 
             <h3>Enter at least two books you like</h3>
